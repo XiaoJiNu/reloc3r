@@ -113,7 +113,7 @@ def cmd_extract(args):
                 T_map_lidar[:3, :3] = Rot.from_quat(map_q[j]).as_matrix()
                 T_map_lidar[:3, 3] = map_p[j]
                 np.savetxt(os.path.join(outdir, name + '.pose.txt'),
-                           T_map_lidar @ R_body_lidar @ T_cam_lidar)
+                           T_map_lidar @ T_cam_lidar)
                 written += 1
 
         sr = np.array(sync_resid)

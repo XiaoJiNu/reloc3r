@@ -1,8 +1,7 @@
-"""离线复现 eval_zc_qwen 的基线过滤聚合（零推理），扫描 base_max 阈值（含 2m）。
-候选 cs 来自 zc_candidates.pkl；db 位姿来自 data/zc_fix/<db>/seq-01；
-pq = inv(pd) @ cs 精确还原 eval 喂给 motion_averaging 的两组输入。"""
+"""零推理阈值扫描：对 eval_zc_qwen.py --dump 存的候选 (data/zc_fix/cands_<q>.npz)
+离线复现 base_max 过滤 + motion_averaging（粗位姿=候选平移中位，无GT泄漏），扫 1..5/inf。
+过滤逻辑逐行照抄 eval_zc_qwen.cmd_eval，故 base_max=inf 行应与 res_<q>.npz 现状一致（脚本内对账）。"""
 import os
-import pickle
 import sys
 
 import numpy as np
@@ -11,48 +10,38 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 from reloc3r.reloc3r_visloc import Reloc3rVisloc
 from reloc3r.utils.metric import get_rot_err
 
-DB = '20260921_064638'
-db_names = sorted(f for f in os.listdir(f'data/zc_fix/{DB}/seq-01') if f.endswith('.pose.txt'))
-dbp = [np.loadtxt(f'data/zc_fix/{DB}/seq-01/{n}') for n in db_names]
-pairs = {q: np.load(f'_db-q_pair_info/zc_{q}_q-retrieval_db-step=1_topk=10.npy', allow_pickle=True)
-         for q in ['20260921_062224', '20260920_081533']}
-
+THRESHOLDS = [0, 1, 1.5, 2, 2.5, 3, 4, 5]  # 0 = 现状(全 top-10)
 visloc = Reloc3rVisloc()
-data = pickle.load(open('docs/zc数据集上测试/tools/zc_candidates.pkl', 'rb'))
 
-
-def aggregate(pd, pq, base_max):
-    if base_max <= 0:
-        return visloc.motion_averaging(pd, pq)
-    cand_t = np.array([(pd[k] @ pq[k])[:3, 3] for k in range(len(pd))])
-    rough = np.median(cand_t, axis=0)
-    keep = [k for k in range(len(pd)) if np.linalg.norm(pd[k][:3, 3] - rough) < base_max]
-    if len(keep) < 2:
-        keep = list(range(len(pd)))
-    return visloc.motion_averaging([pd[k] for k in keep], [pq[k] for k in keep])
-
-
-for q, rows in data.items():
-    n_cand = np.mean([len(cs) for cs, _ in rows])
-    kept = {b: [] for b in [0, 5, 4, 3, 2.5, 2, 1.5, 1]}
-    terrs = {b: [] for b in kept}
-    rerrs = {b: [] for b in kept}
-    for i, (cs, gt) in enumerate(rows):
-        sel = [p['db_idx'] for p in pairs[q][i]]
-        pd = [dbp[j] for j in sel]
-        pq = [np.linalg.inv(pd[k]) @ cs[k] for k in range(len(sel))]
-        for b in kept:
-            Rt = aggregate(pd, pq, b)
-            terrs[b].append(np.linalg.norm(Rt[:3, 3] - gt[:3, 3]))
-            rerrs[b].append(get_rot_err(Rt[:3, :3], gt[:3, :3]))
+for q in ['20260921_062224', '20260920_081533']:
+    d = np.load(f'data/zc_fix/cands_{q}.npz', allow_pickle=True)
+    cs, pdb, gt = d['cs'], d['pdb'], d['gt']  # (n,10,4,4)
+    pq = np.linalg.inv(pdb) @ cs
+    n = len(cs)
+    ref = np.load(f'data/zc_fix/res_{q}.npz', allow_pickle=True)
+    ref3 = np.load(f'data/zc_fix/res_{q}__basemax3.npz', allow_pickle=True)
+    print(f'\n{q}: n={n}')
+    print('base_max kept/frm   terr med   p90    <0.5m    <1m    rerr med/p90')
+    for b in THRESHOLDS:
+        terrs, rerrs, kept = [], [], []
+        for i in range(n):
             if b > 0:
-                cand_t = np.array([c[:3, 3] for c in cs])
-                rough = np.median(cand_t, axis=0)
-                kept[b].append(sum(np.linalg.norm(pd[k][:3, 3] - rough) < b for k in range(len(pd))))
-    print(f'\n{q}  (n={len(rows)}, mean #cands={n_cand:.1f})')
-    print('base_max  kept/frm   terr med  p90   <0.5m  <1m   rerr med/p90')
-    for b in sorted(kept, reverse=True):
-        t, r = np.array(terrs[b]), np.array(rerrs[b])
-        k = f'{np.mean(kept[b]):.1f}' if b > 0 else '-'
-        print(f'{b:>6}   {k:>7}   {np.median(t):6.2f} {np.percentile(t,90):6.2f}  '
-              f'{(t<0.5).mean():5.1%} {(t<1).mean():5.1%}  {np.median(r):.2f}/{np.percentile(r,90):.2f}')
+                rough = np.median(cs[i][:, :3, 3], axis=0)
+                keep = [k for k in range(10) if np.linalg.norm(pdb[i, k][:3, 3] - rough) < b]
+                if len(keep) < 2:
+                    keep = list(range(10))  # 退化回退，与 cmd_eval 一致
+            else:
+                keep = list(range(10))
+            kept.append(len(keep))
+            Rt = visloc.motion_averaging([pdb[i, k] for k in keep], [pq[i, k] for k in keep])
+            terrs.append(np.linalg.norm(Rt[:3, 3] - gt[i][:3, 3]))
+            rerrs.append(get_rot_err(Rt[:3, :3], gt[i][:3, :3]))
+        t, r = np.array(terrs), np.array(rerrs)
+        tag = 'inf' if b == 0 else f'{b}'
+        note = ''
+        if b == 0:
+            note = f'   对账res_: med {np.median(ref["terr"]):.2f}/p90 {np.percentile(ref["terr"],90):.2f}'
+        if b == 3:
+            note = f'   对账basemax3: med {np.median(ref3["terr"]):.2f}/p90 {np.percentile(ref3["terr"],90):.2f}'
+        print(f'{tag:>7}  {np.mean(kept):6.1f}/10  {np.median(t):7.2f} {np.percentile(t,90):7.2f}  '
+              f'{(t<0.5).mean():6.1%} {(t<1).mean():6.1%}  {np.median(r):5.2f}/{np.percentile(r,90):.2f}{note}')

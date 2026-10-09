@@ -188,6 +188,7 @@ def cmd_eval(args):
 
     terrs, rerrs, hit, pred, gtlist = [], [], [], [], []
     pr, pt = [], []
+    cslist, pdlist = [], []
     for qi in range(len(q_names)):
         sel = [p['db_idx'] for p in pairs[qi]]
         view1 = {'img': torch.cat([db_imgs[j]['img'] for j in sel], 0),
@@ -218,6 +219,9 @@ def cmd_eval(args):
         rerrs.append(get_rot_err(Rt[:3, :3], gt[:3, :3]))
         hit.append(any(np.linalg.norm(pd[k][:3, 3] - gt[:3, 3]) < 2.0 for k in range(len(sel))))
         pred.append(Rt); gtlist.append(gt)
+        if args.dump:
+            cslist.append(np.stack([pd[k] @ pq[k] for k in range(len(sel))]))
+            pdlist.append(np.stack([pd[k] for k in range(len(sel))]))
     terrs, rerrs = np.array(terrs), np.array(rerrs)
     m = {'n': len(terrs),
          'terr_m': {'median': float(np.median(terrs)), 'mean': float(terrs.mean()), 'p90': float(np.percentile(terrs, 90))},
@@ -237,6 +241,11 @@ def cmd_eval(args):
     with open(f'{FIX_ROOT}/metrics_{tag}.json', 'w') as f:
         json.dump(m, f, indent=1)
     print(f'-> {FIX_ROOT}/res_{tag}.npz')
+    if args.dump:
+        np.savez(f'{FIX_ROOT}/cands_{args.q}.npz',
+                 cs=np.array(cslist), pdb=np.array(pdlist),  # (n,10,4,4)
+                 gt=np.array(gtlist), names=np.array(q_names))
+        print(f'-> {FIX_ROOT}/cands_{args.q}.npz (for offline aggregation sweep)')
 
 
 if __name__ == '__main__':
@@ -250,6 +259,8 @@ if __name__ == '__main__':
     ep.add_argument('--fp32', action='store_true')
     ep.add_argument('--base-max', dest='base_max', type=float, default=0.0,
                     help='>0: only average candidates whose db pose is within this baseline (m) of the median candidate position')
+    ep.add_argument('--dump', action='store_true',
+                    help='save per-query candidate poses (cs, pd) npz for offline aggregation sweeps (zero extra inference)')
     a = ap.parse_args()
     if a.cmd == 'fixpos':
         fix_poses(a.bags.split(','))

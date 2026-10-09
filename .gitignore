@@ -130,3 +130,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# local pair-info / cache (large, never push)
+_db-q_pair_info/
