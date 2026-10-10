@@ -20,10 +20,11 @@ N = int(os.environ.get("N_EVAL", "200"))  # 200对≈1-2min；N_EVAL=750 全量�
 def run(weights, tag):
     dev = torch.device('cuda')
     model = Reloc3rRelpose(img_size=512)
-    if weights:
-        ck = torch.load(weights, map_location='cpu', weights_only=False)
-        ck = ck.get('model', ck)
-        print(model.load_state_dict(ck, strict=False))
+    # 缺省=官方 reloc3r-512（本地转换 pth）；绝非随机初始化
+    w = weights or 'checkpoints/reloc3r-512.pth'
+    ck = torch.load(w, map_location='cpu', weights_only=False)
+    ck = ck.get('model', ck)
+    print(model.load_state_dict(ck, strict=False))
     model.to(dev).eval()
     ds = MegaDepth_valid(split='test', resolution=(512, 384), pair_subset=0, seed=777)
     pl = Reloc3rPoseLoss()
@@ -34,7 +35,7 @@ def run(weights, tag):
             gt = np.linalg.inv(np.asarray(v1['camera_pose'], dtype=np.float64)) @ np.asarray(v2['camera_pose'], dtype=np.float64)
             batch = [{'img': v['img'][None], 'true_shape': torch.as_tensor(v['true_shape'])[None]} for v in (v1, v2)]
             pr = inference_relpose(batch, model, dev, use_amp=True)[0]  # tensor (B,4,4)? B=1 per view
-            gtT = torch.as_tensor(gt, dtype=torch.float32)[None]
+            gtT = torch.as_tensor(gt, dtype=torch.float32)[None].to(dev)
             p = pr[None] if pr.dim() == 2 else pr
             te.append(float(pl.transl_ang_loss(p[:, :3, 3], gtT[:, :3, 3]) * 180 / np.pi))
             re_.append(float(pl.rot_ang_loss(p[:, :3, :3], gtT[:, :3, :3]) * 180 / np.pi))
