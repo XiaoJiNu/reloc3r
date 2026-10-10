@@ -5,19 +5,22 @@
 set -e; cd "$(dirname "$0")/.."
 PY=${PY:-/data/software/conda/anaconda3/envs/mv2d/bin/python}
 ZC9="./_db-q_pair_info/zc9_{}_q-retrieval_db-step=1_topk=10.npy"
+PAR=${PARITY:-even}      # 训练侧 query 奇偶（all=全训全测上限行）
+EVALP=${EVALP:-odd}      # 训练内测试集奇偶
 if [ "$SMOKE" = 1 ]; then
   N=200; ND=200; EP=1; OUT=checkpoints/_smoke_zc
 else
   N=4000; ND=4000; EP=30; OUT=checkpoints/zc_finetune
 fi
+OUT=${OUT_DIR:-$OUT}
 $PY train.py \
-  --train_dataset "$N @ ZcRelpose(scene='20260921_064638', query_scene='20260920_081533', query_parity='even', resolution=[(512,384)], transform=ColorJitter) \
-                 + $N @ ZcRelpose(scene='20260921_064638', query_scene='20260921_062224', query_parity='even', resolution=[(512,384)], transform=ColorJitter) \
-                 + $N @ ZcRelpose(scene='20260923_055425_real_robot_record_external_lz4', query_scene='20260923_060415_real_robot_record_external_lz4', pairs_info_file_mask='$ZC9', query_parity='even', resolution=[(512,384)], transform=ColorJitter) \
+  --train_dataset "$N @ ZcRelpose(scene='20260921_064638', query_scene='20260920_081533', query_parity='$PAR', resolution=[(512,384)], transform=ColorJitter) \
+                 + $N @ ZcRelpose(scene='20260921_064638', query_scene='20260921_062224', query_parity='$PAR', resolution=[(512,384)], transform=ColorJitter) \
+                 + $N @ ZcRelpose(scene='20260923_055425_real_robot_record_external_lz4', query_scene='20260923_060415_real_robot_record_external_lz4', pairs_info_file_mask='$ZC9', query_parity='$PAR', resolution=[(512,384)], transform=ColorJitter) \
                  + $ND @ MegaDepth_valid(split='train', pair_subset=750, resolution=(512,384), transform=ColorJitter)" \
-  --test_dataset "2000 @ ZcRelpose(scene='20260921_064638', query_scene='20260920_081533', query_parity='odd', resolution=(512,384), seed=777)" \
+  --test_dataset "2000 @ ZcRelpose(scene='20260921_064638', query_scene='20260920_081533', query_parity='$EVALP', resolution=(512,384), seed=777)" \
   --model "Reloc3rRelpose(img_size=512)" \
   --pretrained "checkpoints/reloc3r-512.pth" \
-  --lr 1e-5 --warmup_epochs 2 --epochs $EP --batch_size 8 --freeze_encoder \
+  --lr 1e-5 --warmup_epochs 2 --epochs $EP --batch_size 8 --freeze_encoder --amp 1 \
   --save_freq 5 --keep_freq 10 --eval_freq 1 \
   --output_dir "$OUT"
