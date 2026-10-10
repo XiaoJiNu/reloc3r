@@ -38,4 +38,6 @@ for k in 062224 081533 0923; do
   [ -f data/zc_sim3/res_${k}_sim5_bm3_ft_all.npz ] || ev "$FTALL" all "$k"
 done
 cp results/forgetting_*.json "${SC[0]}/" 2>/dev/null
+echo "[P6] report"
+$PY /data/code/reLocation-all/relopt/scripts/gen_reloc3r_finetune_report.py >> logs_pipeline.log 2>&1 && cp results/forgetting_*.json "${SC[0]}/" 2>/dev/null
 echo PIPELINE_DONE
