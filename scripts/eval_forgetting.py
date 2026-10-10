@@ -50,4 +50,4 @@ def run(weights, tag):
 
 if __name__ == '__main__':
     w = sys.argv[1] if len(sys.argv) > 1 else ''
-    run(w, 'ft' if w else 'official')
+    run(w, (sys.argv[2] if len(sys.argv) > 2 else ('ft' if w else 'official')))

@@ -8,9 +8,9 @@ ZC9="./_db-q_pair_info/zc9_{}_q-retrieval_db-step=1_topk=10.npy"
 PAR=${PARITY:-even}      # 训练侧 query 奇偶（all=全训全测上限行）
 EVALP=${EVALP:-odd}      # 训练内测试集奇偶
 if [ "$SMOKE" = 1 ]; then
-  N=200; ND=200; EP=1; OUT=checkpoints/_smoke_zc
+  N=${N:-200}; ND=${ND:-200}; EP=1; OUT=checkpoints/_smoke_zc
 else
-  N=4000; ND=4000; EP=30; OUT=checkpoints/zc_finetune
+  N=${N:-4000}; ND=${ND:-4000}; EP=${EP:-30}; OUT=checkpoints/zc_finetune
 fi
 OUT=${OUT_DIR:-$OUT}
 $PY train.py \

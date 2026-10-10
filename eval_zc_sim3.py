@@ -85,7 +85,7 @@ def main(key):
         V.append(dvec)  # A2 分量分析用（沿/跨 GT 轨迹方向）
     T, R = np.array(T), np.array(R)
     V = np.array(V)
-    tag = f"_{('ft' if WEIGHTS else 'official')}_{EVAL_PARITY}" if (WEIGHTS or EVAL_PARITY != "all") else ""
+    tag = f"_{os.environ.get('FT_TAG', 'ft' if WEIGHTS else 'official')}_{EVAL_PARITY}" if (WEIGHTS or EVAL_PARITY != "all" or os.environ.get('FT_TAG')) else ""
     tag += os.environ.get("OUT_TAG", "")
     np.savez(f"{OUT}/res_{key}_sim{K}{'_bm3' if USE_BM3 else ''}{tag}.npz",
              terr=T, rerr=R, dvec=V, names=np.array(qn))
