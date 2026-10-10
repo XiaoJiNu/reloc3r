@@ -1,7 +1,7 @@
 """Reloc3r relocalization test on the ZC self-collected mcap dataset.
 
 Subcommands:
-    extract   mcap -> undistorted png + camera c2w pose txt (map frame, metric)
+    extract   mcap -> undistorted png + camera c2w pose txt (map frame, metric; 定稿链含 R_BL)
     retrieve  NetVLAD db descriptors + query top-k pair file
     eval      per-pair relpose regression -> motion averaging -> error metrics
     sanity    self-check: adjacent-db-frame relpose vs /map-derived GT displacement
@@ -23,7 +23,7 @@ BAGS = {  # role: bag stem
 QUERY_ROLES = ('q_same_day', 'q_cross_day')
 BAG_DIR = '/data/data/reLocationData/zc_data'
 CALIB_DIR = '/data/data/location_data/zc_data/研发大楼/022419/calib/hesai_022419'
-DATA_ROOT = './data/zc'
+DATA_ROOT = './data/zc_fix'
 IMG_STEP = 5          # every 5th 10Hz frame -> 2 Hz
 RESOLUTION = (512, 384)
 TOPK = 10
@@ -112,8 +112,12 @@ def cmd_extract(args):
                 from scipy.spatial.transform import Rotation as Rot
                 T_map_lidar[:3, :3] = Rot.from_quat(map_q[j]).as_matrix()
                 T_map_lidar[:3, 3] = map_p[j]
+                # 定稿外参链（四路证据，见 eval_zc_qwen.py 头注）：/map 体系 x前/y左/z上，
+                # 雷达系 x右/y后/z下 -> 必须插入 R_BL；旧 glm 链（无 R_BL）已于 2026-10 废弃删除。
+                R_BL = np.eye(4)
+                R_BL[:3, :3] = [[0., -1., 0.], [-1., 0., 0.], [0., 0., -1.]]
                 np.savetxt(os.path.join(outdir, name + '.pose.txt'),
-                           T_map_lidar @ T_cam_lidar)
+                           T_map_lidar @ R_BL @ T_cam_lidar)
                 written += 1
 
         sr = np.array(sync_resid)

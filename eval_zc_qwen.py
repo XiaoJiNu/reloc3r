@@ -7,10 +7,10 @@
   旁证：camera_01 光轴=-y_lidar=车左（侧装），与 2m/s 直行时纯横向光流（|d|p50=37px, dy≈0, 无扩张）
   及画面地平线高于中心（下俯~10.4°）一致；glm 版把 /map 当雷达系，旋转 GT 差 180° 滚转。
 
-复用 glm 版已提取的去畸变图片与 NetVLAD 检索 pair（均与外参链无关）：
-  data/zc/<bag>/seq-01/frame-*.color.png          图片（symlink 进 data/zc_fix/）
-  _db-q_pair_info/zc_<qbag>_q-retrieval_db-step=1_topk=10.npy
-子命令: fixpos / sanity / eval --q <bag>
+数据（2026-10 整理）：data/zc_fix/ 现为唯一链路（图片已物理化，旧 data/zc 已删除）。
+  eval_zc.py extract 已内嵌 R_BL，重抽 bag 不再需要 fixpos 补丁。
+  _db-q_pair_info/ 草坪对文件的 pose 路径已改写为 ./data/zc_fix/。
+子命令: sanity / eval --q <bag>
 """
 import argparse
 import json
@@ -20,7 +20,6 @@ import numpy as np
 import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 
-DATA_ROOT = './data/zc'
 FIX_ROOT = './data/zc_fix'
 PAIR_DIR = './_db-q_pair_info'
 CALIB = '/data/data/location_data/zc_data/研发大楼/022419/calib/hesai_022419'
@@ -59,28 +58,6 @@ def T_lidar_cam():
     return T  # p_cam = T @ p_lidar
 
 
-def fix_poses(bags):
-    """从旧 pose.txt 反解 T_map_body（旧链 = T_mb @ inv(T_lc)），重算修正链，图片 symlink。"""
-    T_lc = T_lidar_cam()
-    T_cl = np.linalg.inv(T_lc)
-    for b in bags:
-        d = f'{DATA_ROOT}/{b}/seq-01'
-        o = f'{FIX_ROOT}/{b}/seq-01'
-        os.makedirs(o, exist_ok=True)
-        n = 0
-        for f in sorted(os.listdir(d)):
-            if not f.endswith('.pose.txt'):
-                continue
-            p_old = np.loadtxt(f'{d}/{f}')
-            t_mb = p_old @ T_lc                      # 旧链的逆
-            np.savetxt(f'{o}/{f}', t_mb @ R_BL @ T_cl)
-            img = f.replace('.pose.txt', '.color.png')
-            if not os.path.exists(f'{o}/{img}'):
-                os.symlink(os.path.abspath(f'{d}/{img}'), f'{o}/{img}')
-            n += 1
-        print(f'{b}: {n} poses fixed -> {o}')
-
-
 def frame_names(bag):
     return sorted(n[:-len('.color.png')] for n in os.listdir(f'{FIX_ROOT}/{bag}/seq-01')
                   if n.endswith('.color.png'))
@@ -117,7 +94,10 @@ def cmd_sanity(args):
     db = BAGS['db']
     all_names = frame_names(db)
     T_lc = T_lidar_cam()
-    T_mb_all = [np.loadtxt(f'{DATA_ROOT}/{db}/seq-01/{n}.pose.txt') @ T_lc for n in all_names]
+    # 定稿链 pose_fix = T_mb @ R_BL @ inv(T_lc) => T_mb = pose_fix @ T_lc @ R_BL^T（R_BL 旋转部分自逆）
+    T_mb_all = [np.loadtxt(f'{FIX_ROOT}/{db}/seq-01/{n}.pose.txt') @ T_lc @ R_BL.T
+                for n in all_names]
+    # （sanity 的候选链对照语义不变：poses = T_mb @ M @ inv(T_lc)）
     yaw = [math.atan2(t[1, 0], t[0, 0]) for t in T_mb_all]
     pairs = []
     for a in range(0, len(all_names), 40):
@@ -129,7 +109,7 @@ def cmd_sanity(args):
         if len(pairs) >= 6:
             break
     print(f'{len(pairs)} big-step pairs, yaw diffs: {[round(p[2]) for p in pairs]}')
-    imgs = load_images([f'{DATA_ROOT}/{db}/seq-01/{all_names[i]}.color.png'
+    imgs = load_images([f'{FIX_ROOT}/{db}/seq-01/{all_names[i]}.color.png'
                         for a, b, _ in pairs for i in (a, b)], size=512, verbose=False)
     model = setup_model(device) if False else None
     from reloc3r.reloc3r_relpose import setup_reloc3r_relpose_model
@@ -152,7 +132,7 @@ def cmd_sanity(args):
         print(f'{tag}: rot err med {np.median(rr):6.2f}° (per pair: {[f"{x:.1f}" for x in rr]})  cam-down·up={dn:+.2f}')
     # 平移方向角判别（相邻帧，模型 t 无尺度但方向可信，MegaDepth AUC@30=81% 级别）
     step_names = all_names[400:412]
-    step_imgs = load_images([f'{DATA_ROOT}/{db}/seq-01/{n}.color.png' for n in step_names], size=512, verbose=False)
+    step_imgs = load_images([f'{FIX_ROOT}/{db}/seq-01/{n}.color.png' for n in step_names], size=512, verbose=False)
     sp = [T_mb_all[400 + i] for i in range(len(step_names))]
     spreds = []
     for k in range(1, len(step_names)):
@@ -251,8 +231,6 @@ def cmd_eval(args):
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest='cmd', required=True)
-    fp = sub.add_parser('fixpos')
-    fp.add_argument('--bags', default=','.join(BAGS.values()))
     sub.add_parser('sanity')
     ep = sub.add_parser('eval')
     ep.add_argument('--q', required=True)
@@ -262,9 +240,7 @@ if __name__ == '__main__':
     ep.add_argument('--dump', action='store_true',
                     help='save per-query candidate poses (cs, pd) npz for offline aggregation sweeps (zero extra inference)')
     a = ap.parse_args()
-    if a.cmd == 'fixpos':
-        fix_poses(a.bags.split(','))
-    elif a.cmd == 'sanity':
+    if a.cmd == 'sanity':
         cmd_sanity(a)
     else:
         cmd_eval(a)

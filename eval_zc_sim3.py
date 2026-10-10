@@ -3,6 +3,10 @@
 候选集 = MegaLoc snap 存档的 order[:, :3]（全库相似度排名, GT-free）。
 对照: 同数据 top-10 全推(+bm3) 已存档。relpose 计时按 batch=3 实测折算单帧。
 用法: python eval_zc_sim3.py (repo root) <scene_key>
+  env SIM3_K=3/5  SIM3_BM3=0/1 （同前）
+  env WEIGHTS=/path/to/ft.pth 微调权重（{'model':...} pth；缺省=官方 siyan824/reloc3r-512）
+  env EVAL_PARITY=even|odd|all 查询帧奇偶子集（微调防泄漏协议 train=even/eval=odd，同子集对比基线）
+  env OUT_TAG=suffix 输出文件后缀（默认按权重/parity 自动命名，不覆盖归档 sim3 原文件）
 """
 import os, sys, time
 import numpy as np
@@ -23,15 +27,29 @@ SC = {
 }
 K = int(os.environ.get("SIM3_K", "3"))
 USE_BM3 = os.environ.get("SIM3_BM3", "0") == "1"
+WEIGHTS = os.environ.get("WEIGHTS", "")           # 微调 pth；空=官方
+EVAL_PARITY = os.environ.get("EVAL_PARITY", "all")  # even|odd|all（查询帧奇偶）
+
+def _parity(path, par):
+    return par == "all" or int(os.path.basename(path).split("frame-")[-1][:6]) % 2 == (par == "odd")
 
 def main(key):
     import torch
     root, db, q, mlf = SC[key]
     order = np.load(mlf)["order"]
     dbn = sorted(n[:-10] for n in os.listdir(f"{root}/{db}/seq-01") if n.endswith(".color.png"))
-    qn = sorted(n[:-10] for n in os.listdir(f"{root}/{q}/seq-01") if n.endswith(".color.png"))
+    qn_all = sorted(n[:-10] for n in os.listdir(f"{root}/{q}/seq-01") if n.endswith(".color.png"))
+    qn = [n for n in qn_all if _parity(n, EVAL_PARITY)]
+    qsel = np.array([i for i, n in enumerate(qn_all) if _parity(n, EVAL_PARITY)])  # order 行索引
     device = torch.device("cuda")
     model = setup_reloc3r_relpose_model("Reloc3rRelpose(img_size=512)", device)
+    if WEIGHTS:
+        ck = torch.load(WEIGHTS, map_location=device, weights_only=False)  # 本地可信 ckpt（含 optimizer/args）
+        ck = ck.get("model", ck)
+        ck = {k.replace("dec_blocks2", "dec_blocks"): v for k, v in ck.items()} if any(
+            k.startswith("dec_blocks2") for k in ck) else dict(ck)
+        print(model.load_state_dict(ck, strict=False))
+        print(f"finetuned weights loaded: {WEIGHTS}")
     visloc = Reloc3rVisloc()
     db_imgs = load_images([f"{root}/{db}/seq-01/{n}.color.png" for n in dbn], size=512, verbose=False)
     q_imgs = load_images([f"{root}/{q}/seq-01/{n}.color.png" for n in qn], size=512, verbose=False)
@@ -39,7 +57,7 @@ def main(key):
 
     T, R, t_infer = [], [], 0.0
     for qi in range(len(qn)):
-        sel = [int(j) for j in order[qi, :K]]
+        sel = [int(j) for j in order[qsel[qi], :K]]
         n = len(sel)
         v1 = {"img": torch.cat([db_imgs[j]["img"] for j in sel], 0),
               "true_shape": torch.as_tensor(np.stack([db_imgs[j]["true_shape"] for j in sel])).reshape(n, 2)}
@@ -64,9 +82,11 @@ def main(key):
         T.append(float(np.linalg.norm(Rt[:3, 3] - gt[:3, 3])))
         R.append(get_rot_err(Rt[:3, :3], gt[:3, :3]))
     T, R = np.array(T), np.array(R)
-    np.savez(f"{OUT}/res_{key}_sim{K}{'_bm3' if USE_BM3 else ''}.npz",
+    tag = f"_{'ft' if WEIGHTS else 'official'}_{EVAL_PARITY}" if (WEIGHTS or EVAL_PARITY != "all") else ""
+    tag += os.environ.get("OUT_TAG", "")
+    np.savez(f"{OUT}/res_{key}_sim{K}{'_bm3' if USE_BM3 else ''}{tag}.npz",
              terr=T, rerr=R, names=np.array(qn))
-    print(f"{key} sim{K}{'_bm3' if USE_BM3 else ''}: n={len(T)} "
+    print(f"{key} sim{K}{'_bm3' if USE_BM3 else ''}{tag}: n={len(T)} "
           f"terr mean/med/p90 = {T.mean():.2f}/{np.median(T):.2f}/{np.percentile(T,90):.2f} | "
           f"rerr mean/med/p90 = {R.mean():.2f}/{np.median(R):.2f}/{np.percentile(R,90):.2f} | "
           f"relpose {(t_infer/len(qn))*1000:.0f} ms/帧")

@@ -1,8 +1,8 @@
 """ZC self-collected dataset adapters (7Scenes-style layout), for eval_zc.py.
 
-Layout (produced by eval_zc.py extract):
-    data/zc/<scene>/<seq>/frame-XXXXXX.color.png   (undistorted 640x480 RGB)
-    data/zc/<scene>/<seq>/frame-XXXXXX.pose.txt    (4x4 c2w, map frame, metric)
+Layout (correct extrinsic chain; old data/zc chain deleted 2026-10-10):
+    data/zc_fix/<scene>/<seq>/frame-XXXXXX.color.png   (undistorted 640x480 RGB)
+    data/zc_fix/<scene>/<seq>/frame-XXXXXX.pose.txt    (4x4 c2w, map frame, metric)
 """
 import os
 import copy
@@ -15,7 +15,7 @@ from reloc3r.image_retrieval.topk_retrieval import PREPROCESS_FOLDER
 
 ZC_PAIR_INFO_MASK = 'zc_{}_q-retrieval_db-step={}_topk={}.npy'
 
-DATA_ROOT = './data/zc'
+DATA_ROOT = './data/zc_fix'
 # from in-bag camera_info (constant across bags, verified)
 INTRINSICS = np.array([[366.0964660644531, 0, 321.33489990234375],
                        [0, 366.00811767578125, 242.17283630371094],
@@ -49,10 +49,15 @@ class ZcRetrieval:
 
 
 class ZcRelpose(BaseStereoViewDataset):
-    """(db, query) pairs from a retrieval pair-info file; db/query poses come from .pose.txt."""
+    """(db, query) pairs from a retrieval pair-info file; db/query poses come from .pose.txt.
+
+    query_parity: 'all' | 'even' | 'odd' — split queries by frame index parity so finetune
+    train/eval use disjoint query frames (db frames intentionally shared, they are the map).
+    """
 
     def __init__(self, scene, pairs_info_file_mask=PREPROCESS_FOLDER + '/' + ZC_PAIR_INFO_MASK,
-                 db_step=1, topk=10, pair_id=None, query_scene=None, *args, **kwargs):
+                 db_step=1, topk=10, pair_id=None, query_scene=None, query_parity='all',
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.root_folder = DATA_ROOT
         self.scene = scene
@@ -65,8 +70,33 @@ class ZcRelpose(BaseStereoViewDataset):
         for pairs in pairs_info:
             self.loaded_data[self._map_query_path(pairs[0]['query_path'])] = \
                 [p['db_path'] for p in pairs]
+        if query_parity in ('even', 'odd'):
+            p0 = 0 if query_parity == 'even' else 1
+            self.loaded_data = {q: d for q, d in self.loaded_data.items()
+                                if int(q.split('frame-')[-1][:6]) % 2 == p0}
         self.queries = list(self.loaded_data)
         self.pair_id = pair_id
+        self._pose_chain_guard()
+
+    def _pose_chain_guard(self):
+        """Fail fast if pose.txt comes from the deprecated chain (missing R_BL).
+
+        Finalized chain: camera optical axis (z_cam = pose row 2) points ~10 deg below
+        horizon => z_cam . map_up (pose[2,2]) in (-0.5, 0). Old glm chain gives +0.2 (camera
+        flipped) / any other layout will show |.|>=0.5 -> treat as wrong chain. Samples 20 frames.
+        """
+        fs = [q.replace('.color.png', '.pose.txt') for q in self.queries[:20]]
+        vals = []
+        for f in fs:
+            if os.path.exists(f):
+                vals.append(float(np.loadtxt(f)[2, 2]))
+        if not vals:
+            return  # paths not readable here (e.g. retrieval-relative); eval scripts guard separately
+        med = float(np.median(vals))
+        assert -0.5 < med < 0.0, (
+            f'ZC pose chain guard FAILED for {self.scene}: median cam-z.map-up={med:+.2f} '
+            f'(finalized chain expects -0.5..0). Likely re-extracted with the old glm chain '
+            f'(missing R_BL, ~2m pose error). Fix eval_zc.py extract / re-run fixpos-era check.')
 
     def _map_query_path(self, path):
         """Retrieval stored query paths of scene=db; rewrite scene dir to the query bag."""

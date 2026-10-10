@@ -8,12 +8,20 @@ import h5py
 DATA_ROOT='./data/megadepth1500' 
 
 class MegaDepth_valid(BaseStereoViewDataset):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, pair_subset=None, **kwargs):
+        """pair_subset: None=all 1500; N>0=first N pairs of seeded perm (finetune train);
+        0=back half (eval, disjoint from any train N<=750) -> honest forgetting check."""
         self.ROOT = DATA_ROOT
         super().__init__(*args, **kwargs)
         self.metadata = dict(np.load(osp.join(self.ROOT, f'megadepth_meta_test.npz'), allow_pickle=True))
         with open(osp.join(self.ROOT, f'megadepth_test_pairs.txt'), 'r') as f:
             self.scenes = f.readlines()
+        if pair_subset is not None:
+            # disjoint train/eval halves so finetune-on-1500 doesn't inflate the forgetting check
+            idx = np.random.RandomState(777).permutation(len(self.scenes))
+            k = pair_subset if pair_subset > 0 else len(self.scenes) // 2
+            take = set(idx[:k].tolist()) if pair_subset > 0 else set(idx[k:].tolist())
+            self.scenes = [s for i, s in enumerate(self.scenes) if i in take]
         self.load_depth = False
 
     def __len__(self):
