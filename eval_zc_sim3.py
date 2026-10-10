@@ -55,7 +55,7 @@ def main(key):
     q_imgs = load_images([f"{root}/{q}/seq-01/{n}.color.png" for n in qn], size=512, verbose=False)
     pose = lambda s, n: np.loadtxt(f"{root}/{s}/seq-01/{n}.pose.txt")
 
-    T, R, t_infer = [], [], 0.0
+    T, R, V, t_infer = [], [], [], 0.0
     for qi in range(len(qn)):
         sel = [int(j) for j in order[qsel[qi], :K]]
         n = len(sel)
@@ -79,13 +79,16 @@ def main(key):
             pd, pq = [pd[i] for i in keep], [pq[i] for i in keep]
         Rt = visloc.motion_averaging(pd, pq)
         gt = pose(q, qn[qi])
-        T.append(float(np.linalg.norm(Rt[:3, 3] - gt[:3, 3])))
+        dvec = Rt[:3, 3] - gt[:3, 3]
+        T.append(float(np.linalg.norm(dvec)))
         R.append(get_rot_err(Rt[:3, :3], gt[:3, :3]))
+        V.append(dvec)  # A2 分量分析用（沿/跨 GT 轨迹方向）
     T, R = np.array(T), np.array(R)
-    tag = f"_{'ft' if WEIGHTS else 'official'}_{EVAL_PARITY}" if (WEIGHTS or EVAL_PARITY != "all") else ""
+    V = np.array(V)
+    tag = f"_{('ft' if WEIGHTS else 'official')}_{EVAL_PARITY}" if (WEIGHTS or EVAL_PARITY != "all") else ""
     tag += os.environ.get("OUT_TAG", "")
     np.savez(f"{OUT}/res_{key}_sim{K}{'_bm3' if USE_BM3 else ''}{tag}.npz",
-             terr=T, rerr=R, names=np.array(qn))
+             terr=T, rerr=R, dvec=V, names=np.array(qn))
     print(f"{key} sim{K}{'_bm3' if USE_BM3 else ''}{tag}: n={len(T)} "
           f"terr mean/med/p90 = {T.mean():.2f}/{np.median(T):.2f}/{np.percentile(T,90):.2f} | "
           f"rerr mean/med/p90 = {R.mean():.2f}/{np.median(R):.2f}/{np.percentile(R,90):.2f} | "
