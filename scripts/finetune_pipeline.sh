@@ -5,14 +5,23 @@
 set -u; cd "$(dirname "$0")/.."
 PY=/data/software/conda/anaconda3/envs/mv2d/bin/python
 FT=checkpoints/zc_finetune/checkpoint-best.pth
+OUT_MAIN=checkpoints/zc_finetune
 FTALL=checkpoints/zc_finetune_all/checkpoint-best.pth
+OUT_ALL=checkpoints/zc_finetune_all
 SC=("/data/code/reLocation-all/relopt/results/finetune")
 mkdir -p "${SC[0]}"
 ev(){ SIM3_K=5 SIM3_BM3=1 WEIGHTS="$1" EVAL_PARITY="$2" $PY eval_zc_sim3.py "$3" >> logs_pipeline.log 2>&1 || echo "EVAL_FAIL $3 $1 $2"; }
 
 echo "[P1] main finetune (parity=even, 30ep)"
-pgrep -f "[t]rain.py" >/dev/null && echo "  train.py already running, waiting" || bash scripts/finetune_zc.sh >> logs_pipeline.log 2>&1
-while pgrep -f "[t]rain.py" >/dev/null; do sleep 120; done
+# 30ep 完成标志=checkpoint-final.pth；进程没了但没跑完 => 重拉（auto-resume last ckpt，
+# 配合看门狗杀挂死，见 finetune_watchdog.sh）。最多丢 save_freq=5 个 epoch。
+while [ ! -f "${OUT_MAIN}/checkpoint-final.pth" ]; do
+  if ! pgrep -f "[t]rain.py" >/dev/null; then
+    echo "  starting/resuming main train $(date +%H:%M)" >> logs_pipeline.log
+    bash scripts/finetune_zc.sh >> logs_pipeline.log 2>&1 &
+  fi
+  sleep 120
+done
 [ -f "$FT" ] || { echo "PIPELINE_FAIL no $FT"; exit 1; }
 echo "[P1] done -> $FT"
 
@@ -25,10 +34,13 @@ for k in 062224 081533 0923; do
 done
 
 echo "[P4] upper-bound run (train=all, 30ep)"
-if [ ! -f "$FTALL" ]; then
-  PARITY=all EVALP=all OUT_DIR=checkpoints/zc_finetune_all bash scripts/finetune_zc.sh >> logs_pipeline.log 2>&1
-fi
-while pgrep -f "[t]rain.py" >/dev/null; do sleep 120; done
+while [ ! -f "${OUT_ALL}/checkpoint-final.pth" ]; do
+  if ! pgrep -f "[t]rain.py" >/dev/null; then
+    echo "  starting/resuming all-train $(date +%H:%M)" >> logs_pipeline.log
+    PARITY=all EVALP=all OUT_DIR=$OUT_ALL bash scripts/finetune_zc.sh >> logs_pipeline.log 2>&1 &
+  fi
+  sleep 120
+done
 [ -f "$FTALL" ] || { echo "PIPELINE_FAIL no $FTALL"; exit 1; }
 
 echo "[P5] upper-bound backtest (official all + ft all, same subset)"
