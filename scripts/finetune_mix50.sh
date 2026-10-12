@@ -9,7 +9,7 @@ PY=/data/software/conda/anaconda3/envs/mv2d/bin/python
 FT=checkpoints/zc_finetune_mix50/checkpoint-best.pth
 
 echo "[M0] waiting for main pipeline PIPELINE_DONE"
-while ! grep -q PIPELINE_DONE logs_pipeline.log 2>/dev/null; do sleep 300; done
+while ! grep -q PIPELINE_DONE logs_pipeline_sup.log logs_pipeline.log 2>/dev/null; do sleep 300; done
 sleep 60  # 让 P6 报告写完
 
 echo "[M1] mix50 finetune (30ep, resume 不允许=全新目录)" >> logs_mix50.log

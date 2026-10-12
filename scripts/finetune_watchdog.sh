@@ -9,8 +9,10 @@ while true; do
   sleep 300
   for p in $(pgrep -f "[t]rain.py"); do
     od=$(tr '\0' '\n' </proc/$p/cmdline 2>/dev/null | grep -A1 -- "--output_dir" | tail -1)
-    lp="$od/log.txt"
-    [ -f "$lp" ] || continue
+    # 心跳=tfevents(SummaryWriter 每 print_freq iter 写一次, 比 epoch 级的 log.txt 平滑;
+    # 曾用 log.txt 且单 epoch ~30min 时误杀正常训练 2026-10-12)
+    lp=$(ls -t "$od"/events.out.tfevents.* 2>/dev/null | head -1)
+    [ -n "$lp" ] || continue
     age=$(( $(date +%s) - $(stat -c %Y "$lp" 2>/dev/null || date +%s) ))
     if [ "$age" -gt "$STALE" ]; then
       echo "$(date +%F_%H:%M) watchdog: $p stale=${age}s log=$lp -> SIGKILL" >> logs_watchdog.log
