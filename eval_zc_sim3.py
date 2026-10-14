@@ -28,6 +28,7 @@ SC = {
 K = int(os.environ.get("SIM3_K", "3"))
 USE_BM3 = os.environ.get("SIM3_BM3", "0") == "1"
 AGG = os.environ.get("SIM3_AGG", "")  # ""=现行 | dualgate(M1 双锚+时序门)
+REJ = float(os.environ.get("SIM3_REJ_M", "2.0"))  # dualgate 跳变拒绝阈值 m（0=关；离线扫 2.0 最优）
 WEIGHTS = os.environ.get("WEIGHTS", "")           # 微调 pth；空=官方
 EVAL_PARITY = os.environ.get("EVAL_PARITY", "all")  # even|odd|all（查询帧奇偶）
 
@@ -98,6 +99,9 @@ def main(key):
                 keep = list(range(n))
             pd, pq = [pd[i] for i in keep], [pq[i] for i in keep]
         Rt = visloc.motion_averaging(pd, pq)
+        if AGG == "dualgate" and REJ > 0 and prev_pos is not None \
+                and np.linalg.norm(Rt[:2, 3] - (prev_pos + DGT[qi])) > REJ:
+            Rt[:2, 3] = prev_pos + DGT[qi]  # M1 方法3-lite: 聚合跳变>REJ m 冻结为预测位（离线扫 reject=2.0 最优）
         prev_pos = Rt[:2, 3].copy()
         gt = pose(q, qn[qi])
         dvec = Rt[:3, 3] - gt[:3, 3]

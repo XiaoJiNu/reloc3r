@@ -17,14 +17,14 @@ while [ ! -f "$D/checkpoint-final.pth" ]; do
 done
 log "train done"
 sleep 60
-[ -f results/forgetting_ft_M_mix50_lr5e6.json ] || \
+[ -f results/forgetting_M_mix50_lr5e6.json ] || \
   $PY scripts/eval_forgetting.py "$FT" M_mix50_lr5e6 >> M3M4_auto.log 2>&1
 for k in 062224 081533 0923; do
   [ -f data/zc_sim3/res_${k}_sim5_bm3_ftM_odd.npz ] || \
     SIM3_K=5 SIM3_BM3=1 WEIGHTS=$FT EVAL_PARITY=odd FT_TAG=ftM \
     $PY eval_zc_sim3.py $k >> M3M4_auto.log 2>&1
   [ -f data/zc_sim3/res_${k}_sim5_dg_ftM_odd.npz ] || \
-    SIM3_K=5 SIM3_AGG=dualgate WEIGHTS=$FT EVAL_PARITY=odd FT_TAG=ftM \
+    SIM3_K=5 SIM3_AGG=dualgate SIM3_REJ_M=2.0 WEIGHTS=$FT EVAL_PARITY=odd FT_TAG=ftM \
     $PY eval_zc_sim3.py $k >> M3M4_auto.log 2>&1
 done
 cp results/forgetting_*.json "$SCOUT/" 2>/dev/null
