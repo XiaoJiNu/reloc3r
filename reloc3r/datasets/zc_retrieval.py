@@ -53,13 +53,16 @@ class ZcRelpose(BaseStereoViewDataset):
 
     query_parity: 'all' | 'even' | 'odd' — split queries by frame index parity so finetune
     train/eval use disjoint query frames (db frames intentionally shared, they are the map).
+    data_root: optional override of DATA_ROOT (default ./data/zc_fix); 0923 bags still
+    resolve via absolute/relative paths stored inside the pair npy.
     """
 
     def __init__(self, scene, pairs_info_file_mask=PREPROCESS_FOLDER + '/' + ZC_PAIR_INFO_MASK,
                  db_step=1, topk=10, pair_id=None, query_scene=None, query_parity='all',
+                 data_root=None,
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.root_folder = DATA_ROOT
+        self.root_folder = data_root or DATA_ROOT
         self.scene = scene
         # query images live in a different scene folder than the db (scene=db bag, query_scene=query bag)
         self.query_scene = query_scene or scene

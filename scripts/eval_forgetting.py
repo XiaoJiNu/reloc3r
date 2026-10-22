@@ -49,5 +49,15 @@ def run(weights, tag):
 
 
 if __name__ == '__main__':
+    # ZC-only 微调：公开集遗忘不作硬门禁（方案 Phase1）；仍可手动跑对照。
+    if os.environ.get('ZC_ONLY', '0') in ('1', 'true', 'True', 'yes'):
+        print('ZC_ONLY=1: skip MegaDepth forgetting hard gate (optional side note only).')
+        tag = (sys.argv[2] if len(sys.argv) > 2 else 'zc_only_skip')
+        out = {'tag': tag, 'skipped': True, 'reason': 'ZC_ONLY'}
+        os.makedirs('results', exist_ok=True)
+        path = f'results/forgetting_{tag}.json'
+        json.dump(out, open(path, 'w'), indent=1)
+        print(out, '->', path)
+        raise SystemExit(0)
     w = sys.argv[1] if len(sys.argv) > 1 else ''
     run(w, (sys.argv[2] if len(sys.argv) > 2 else ('ft' if w else 'official')))
