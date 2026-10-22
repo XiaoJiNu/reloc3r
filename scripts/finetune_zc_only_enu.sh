@@ -5,6 +5,7 @@
 # 红线: OUT_DIR 默认 checkpoints/zc_finetune_ZC_only_enu（勿覆盖 Phase1）
 # pretrained 默认官方 reloc3r-512.pth（与 Phase1 公平对比）
 set -euo pipefail
+export PYTHONUNBUFFERED=1
 cd "$(dirname "$0")/.."
 PY=${PY:-/data/software/conda/anaconda3/envs/mv2d/bin/python}
 ZCM="./_db-q_pair_info/zcME_{}_q-retrieval_db-step=1_topk=10.npy"
