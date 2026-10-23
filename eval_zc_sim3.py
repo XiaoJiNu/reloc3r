@@ -67,7 +67,33 @@ def main(key):
     visloc = Reloc3rVisloc()
     db_imgs = load_images([f"{root}/{db}/seq-01/{n}.color.png" for n in dbn], size=512, verbose=False)
     q_imgs = load_images([f"{root}/{q}/seq-01/{n}.color.png" for n in qn], size=512, verbose=False)
-    pose = lambda s, n: np.loadtxt(f"{root}/{s}/seq-01/{n}.pose.txt")
+    # P5: APPLY_OFF=1 → 仅旋入「相对本场景 db 包」的 Δoff（双天线逐包标定差，~0–1.3°）
+    # 禁止把绝对 off_rad(~93°) 旋入：会破坏运动平均射线几何（实测 terr 炸到米级）。
+    _APPLY_OFF = os.environ.get("APPLY_OFF", "0") == "1"
+    _OFF_CACHE = {}
+    def _off_rad(bag):
+        if bag not in _OFF_CACHE:
+            g = np.load(f"/data/code/reLocation-all/relopt/cache/rtk_gt_{bag}.npz")
+            _OFF_CACHE[bag] = float(g["off_rad"])
+        return _OFF_CACHE[bag]
+    def _Rz(yaw):
+        c, s = float(np.cos(yaw)), float(np.sin(yaw))
+        return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float64)
+    _off_db0 = _off_rad(db) if _APPLY_OFF else 0.0
+    def pose(s, n):
+        T = np.loadtxt(f"{root}/{s}/seq-01/{n}.pose.txt")
+        if _APPLY_OFF:
+            d_off = _off_rad(s) - _off_db0  # db 包 Δ=0；query 包 ≈ off_q-off_db
+            if abs(d_off) > 1e-12:
+                T = T.copy(); T[:3, :3] = _Rz(d_off) @ T[:3, :3]
+        return T
+    if _APPLY_OFF:
+        print(f"[eval_zc_sim3] APPLY_OFF=1 Δoff vs db={db}: "
+              f"db0={_off_db0:.6f} q_doff={_off_rad(q)-_off_db0:.6f} rad "
+              f"({(_off_rad(q)-_off_db0)*180/3.14159265:.3f} deg)")
+    visloc = Reloc3rVisloc()
+    db_imgs = load_images([f"{root}/{db}/seq-01/{n}.color.png" for n in dbn], size=512, verbose=False)
+    q_imgs = load_images([f"{root}/{q}/seq-01/{n}.color.png" for n in qn], size=512, verbose=False)
 
     T, R, V, t_infer = [], [], [], 0.0
     prev_pos = None
