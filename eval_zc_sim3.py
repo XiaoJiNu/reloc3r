@@ -91,9 +91,6 @@ def main(key):
         print(f"[eval_zc_sim3] APPLY_OFF=1 Δoff vs db={db}: "
               f"db0={_off_db0:.6f} q_doff={_off_rad(q)-_off_db0:.6f} rad "
               f"({(_off_rad(q)-_off_db0)*180/3.14159265:.3f} deg)")
-    visloc = Reloc3rVisloc()
-    db_imgs = load_images([f"{root}/{db}/seq-01/{n}.color.png" for n in dbn], size=512, verbose=False)
-    q_imgs = load_images([f"{root}/{q}/seq-01/{n}.color.png" for n in qn], size=512, verbose=False)
 
     T, R, V, t_infer = [], [], [], 0.0
     prev_pos = None
